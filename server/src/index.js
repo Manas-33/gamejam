@@ -6,11 +6,29 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import GameManager from './GameManager.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Serve static files from client build in production
+const clientDistPath = join(__dirname, '../../client/dist');
+app.use(express.static(clientDistPath));
+
+// SPA fallback - serve index.html for all non-API routes (Express 5 compatible)
+app.use((req, res, next) => {
+    if (req.method === 'GET' && !req.path.startsWith('/socket.io') && !req.path.includes('.')) {
+        res.sendFile(join(clientDistPath, 'index.html'));
+    } else {
+        next();
+    }
+});
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
@@ -322,8 +340,9 @@ setInterval(() => {
 }, 1000);
 
 const PORT = process.env.PORT || 3001;
+const HOST = process.env.NODE_ENV === 'production' ? '0.0.0.0' : 'localhost';
 
-httpServer.listen(PORT, 'localhost', () => {
-    console.log(`🎮 Protocol: UNMASK server running on port ${PORT}`);
+httpServer.listen(PORT, HOST, () => {
+    console.log(`🎮 Protocol: UNMASK server running on ${HOST}:${PORT}`);
     console.log(`📊 Configured for up to 100+ concurrent players`);
 });
