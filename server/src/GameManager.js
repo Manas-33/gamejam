@@ -227,8 +227,10 @@ class GameManager {
 
         if (newPhase === 'heist') {
             // Initialize code fragments for each squad
+            // Code length is based on squad size (2 chars per player)
             this.squads.forEach((squad, squadId) => {
-                this.codeFragments.set(squadId, this.generateCodeFragments());
+                const teamSize = squad.players.length;
+                this.codeFragments.set(squadId, this.generateCodeFragments(teamSize));
                 squad.setMinigame('signal_jammer');
             });
         }
@@ -251,13 +253,18 @@ class GameManager {
 
     /**
      * Generate random code fragments for the getaway phase
+     * Code length scales with team size: 2 characters per player
+     * Uses only characters available on the keypad: A-H and 1-8
+     * @param {number} teamSize - Number of players in the squad
      * @returns {Array}
      */
-    generateCodeFragments() {
-        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    generateCodeFragments(teamSize) {
+        // Only use characters that appear on the keypad
+        const keypadChars = 'ABCDEFGH12345678';
+        const codeLength = teamSize * 2; // 2 characters per player
         const fragments = [];
-        for (let i = 0; i < 4; i++) {
-            fragments.push(chars[Math.floor(Math.random() * chars.length)]);
+        for (let i = 0; i < codeLength; i++) {
+            fragments.push(keypadChars[Math.floor(Math.random() * keypadChars.length)]);
         }
         return fragments;
     }

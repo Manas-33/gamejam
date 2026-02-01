@@ -82,3 +82,10 @@ The frontend proxies Socket.io requests to the backend server.
   - WaitingView shows scanned target's prompt and image
   - Real-time progress tracking (X/Y teammates ready)
   - Global state properly cleared on game reset
+- **Fixed scan confirmation**: ScannerView now sends target ID to server for proper tracking
+- **Dynamic getaway codes**: 
+  - Code length scales with team size (2 characters per player)
+  - 2-player team = 4 chars, 4-player team = 8 chars, etc.
+  - Each team gets a unique randomized code
+  - Only uses keypad characters (A-H, 1-8)
+  - Server-side code verification (no hardcoded codes)
