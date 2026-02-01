@@ -18,6 +18,16 @@ const io = new Server(httpServer, {
         origin: '*',
         methods: ['GET', 'POST'],
     },
+    pingTimeout: 60000,
+    pingInterval: 25000,
+    maxHttpBufferSize: 1e6,
+    perMessageDeflate: {
+        threshold: 1024,
+    },
+    connectionStateRecovery: {
+        maxDisconnectionDuration: 2 * 60 * 1000,
+        skipMiddlewares: true,
+    },
 });
 
 // Initialize game manager
@@ -313,6 +323,7 @@ setInterval(() => {
 
 const PORT = process.env.PORT || 3001;
 
-httpServer.listen(PORT, () => {
+httpServer.listen(PORT, 'localhost', () => {
     console.log(`🎮 Protocol: UNMASK server running on port ${PORT}`);
+    console.log(`📊 Configured for up to 100+ concurrent players`);
 });
