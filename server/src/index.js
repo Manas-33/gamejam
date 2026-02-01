@@ -205,20 +205,56 @@ io.on('connection', (socket) => {
             return;
         }
 
+        const squad = gameManager.squads.get(player.squad);
+        if (!squad) {
+            callback({ success: false });
+            return;
+        }
+
+        // Already completed - don't process again
+        if (squad.finishPosition !== null) {
+            callback({ success: true, position: squad.finishPosition, isWinner: squad.finishPosition === 1 });
+            return;
+        }
+
         const success = gameManager.verifyCode(player.squad, data.code);
 
         if (success) {
-            // Emit to each squad player directly (no room dependency)
-            const squad = gameManager.squads.get(player.squad);
-            if (squad) {
-                squad.players.forEach(p => {
-                    io.to(p.id).emit('heist_complete');
-                });
+            // Track finish position - increment global counter
+            if (!global.finishCounter) {
+                global.finishCounter = 0;
             }
-            io.to('gm').emit('squad_completed', { squadId: player.squad });
-        }
+            global.finishCounter++;
+            const position = global.finishCounter;
+            const totalSquads = gameManager.squads.size;
+            const isWinner = position === 1;
 
-        callback({ success });
+            // Mark squad as complete with position
+            squad.markComplete(position);
+
+            // Emit to each squad player directly with their result
+            squad.players.forEach(p => {
+                io.to(p.id).emit('heist_complete', { 
+                    position, 
+                    totalSquads, 
+                    isWinner,
+                    tasksCompleted: squad.tasksCompleted
+                });
+            });
+            
+            io.to('gm').emit('squad_completed', { 
+                squadId: player.squad, 
+                position, 
+                totalSquads 
+            });
+            
+            // Broadcast updated leaderboard
+            io.to('gm').emit('leaderboard_update', gameManager.getLeaderboard());
+
+            callback({ success: true, position, isWinner });
+        } else {
+            callback({ success: false });
+        }
     });
 
     // Squad-wide advance to next view - ONLY affects the player's squad
@@ -249,10 +285,16 @@ io.on('connection', (socket) => {
 
         console.log(`[SQUAD_ADVANCE] Squad ${player.squad} advancing to: ${data.view}`);
         
+        // Track the view change
+        squad.setView(data.view);
+        
         // Only broadcast to THIS squad's players
         squad.players.forEach(p => {
             io.to(p.id).emit('view_change', { view: data.view });
         });
+        
+        // Broadcast updated leaderboard to GM
+        io.to('gm').emit('leaderboard_update', gameManager.getLeaderboard());
     });
 
     // Get code fragment - assigns unique positions to each player PER SQUAD

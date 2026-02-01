@@ -261,6 +261,60 @@ class GameManager {
         this.drawings = [];
         this.codeFragments.clear();
         this.squadSize = 4; // Reset to default team size
+        // Reset global finish counter and squad fragments
+        global.finishCounter = 0;
+        global.squadFragments = new Map();
+    }
+
+    /**
+     * Get leaderboard data showing all squads' progress
+     * @returns {Array} Sorted array of squad progress data
+     */
+    getLeaderboard() {
+        const squadNames = ['ALPHA', 'BRAVO', 'CHARLIE', 'DELTA', 'ECHO', 'FOXTROT', 'GOLF', 'HOTEL', 'INDIA', 'JULIET'];
+        const leaderboard = [];
+        let index = 0;
+        
+        this.squads.forEach((squad, squadId) => {
+            // Calculate progress percentage based on view
+            let progressPercent = 0;
+            switch (squad.currentView) {
+                case 'lobby': progressPercent = 0; break;
+                case 'chain': progressPercent = 10; break;
+                case 'scanner': progressPercent = 15; break;
+                case 'waiting': progressPercent = 20; break;
+                case 'signal_jammer': progressPercent = 30; break;
+                case 'tumbler': progressPercent = 50; break;
+                case 'getaway': progressPercent = 75; break;
+                case 'complete': progressPercent = 100; break;
+                default: progressPercent = 0;
+            }
+            
+            leaderboard.push({
+                id: squadId,
+                name: squadNames[index] || `SQUAD ${index + 1}`,
+                currentView: squad.currentView,
+                progressPercent,
+                tasksCompleted: squad.tasksCompleted,
+                finishPosition: squad.finishPosition,
+                completedAt: squad.completedAt,
+                playerCount: squad.players.length,
+                isComplete: squad.finishPosition !== null,
+            });
+            index++;
+        });
+        
+        // Sort: completed squads by position, then incomplete by progress
+        leaderboard.sort((a, b) => {
+            if (a.isComplete && b.isComplete) {
+                return a.finishPosition - b.finishPosition;
+            }
+            if (a.isComplete) return -1;
+            if (b.isComplete) return 1;
+            return b.progressPercent - a.progressPercent;
+        });
+        
+        return leaderboard;
     }
 
     /**

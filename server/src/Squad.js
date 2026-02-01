@@ -15,6 +15,10 @@ class Squad {
         this.progress = 0; // 0-100 for heist phase
         this.currentMinigame = null;
         this.minigameStates = new Map(); // Player-specific minigame states
+        this.currentView = 'lobby'; // Track current view/phase for this squad
+        this.completedAt = null; // Timestamp when squad completed the heist
+        this.finishPosition = null; // 1st, 2nd, 3rd, etc.
+        this.tasksCompleted = 0; // Number of minigame tasks completed
     }
 
     /**
@@ -138,6 +142,10 @@ class Squad {
             isLoopComplete: this.isLoopComplete,
             progress: this.progress,
             currentMinigame: this.currentMinigame,
+            currentView: this.currentView,
+            completedAt: this.completedAt,
+            finishPosition: this.finishPosition,
+            tasksCompleted: this.tasksCompleted,
             players: this.players.map(p => ({
                 id: p.id,
                 nickname: p.nickname,
@@ -145,6 +153,33 @@ class Squad {
                 scanComplete: p.scanComplete,
             })),
         };
+    }
+
+    /**
+     * Set the current view for this squad
+     * @param {string} view - Current view name
+     */
+    setView(view) {
+        this.currentView = view;
+        // Track task completion based on view transitions
+        if (view === 'tumbler') {
+            this.tasksCompleted = 1; // Completed signal jammer
+        } else if (view === 'getaway') {
+            this.tasksCompleted = 2; // Completed both minigames
+        } else if (view === 'complete') {
+            this.tasksCompleted = 3; // Completed getaway
+        }
+    }
+
+    /**
+     * Mark this squad as completed with a finish position
+     * @param {number} position - 1st, 2nd, 3rd, etc.
+     */
+    markComplete(position) {
+        this.completedAt = Date.now();
+        this.finishPosition = position;
+        this.currentView = 'complete';
+        this.tasksCompleted = 3;
     }
 
     /**
