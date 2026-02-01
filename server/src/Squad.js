@@ -15,9 +15,6 @@ class Squad {
         this.progress = 0; // 0-100 for heist phase
         this.currentMinigame = null;
         this.minigameStates = new Map(); // Player-specific minigame states
-        this.currentPhase = 'chain'; // chain, heist, getaway, complete
-        this.correctSymbol = 0; // Correct symbol for Signal Jammer
-        this.signalJammerGuesses = 0; // Track wrong guesses for Signal Jammer
     }
 
     /**
@@ -141,7 +138,6 @@ class Squad {
             isLoopComplete: this.isLoopComplete,
             progress: this.progress,
             currentMinigame: this.currentMinigame,
-            currentPhase: this.currentPhase,
             players: this.players.map(p => ({
                 id: p.id,
                 nickname: p.nickname,
@@ -149,33 +145,6 @@ class Squad {
                 scanComplete: p.scanComplete,
             })),
         };
-    }
-
-    /**
-     * Set the current phase for this squad
-     * @param {string} phase - 'chain', 'heist', 'getaway', 'complete'
-     */
-    setPhase(phase) {
-        this.currentPhase = phase;
-        if (phase === 'heist') {
-            this.signalJammerGuesses = 0;
-        }
-    }
-
-    /**
-     * Record a Signal Jammer guess and check if max tries exceeded
-     * @param {number} maxTries - Maximum allowed wrong guesses
-     * @returns {boolean} - true if can still guess, false if exceeded
-     */
-    canGuessSignalJammer(maxTries) {
-        return this.signalJammerGuesses < maxTries;
-    }
-
-    /**
-     * Increment Signal Jammer wrong guesses
-     */
-    recordWrongGuess() {
-        this.signalJammerGuesses++;
     }
 
     /**

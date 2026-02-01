@@ -29,8 +29,6 @@ class GameManager {
         this.maxPlayers = 100;
         this.squadSize = 4; // configurable team size
         this.gracePeriodsMs = 30000;
-        this.tumblerStates = new Map(); // squadId -> Map of player tumbler states
-        this.tumblerSyncStarts = new Map(); // squadId -> sync start timestamp
     }
 
     /**
@@ -227,11 +225,10 @@ class GameManager {
         this.phase = newPhase;
 
         if (newPhase === 'heist') {
-            // Initialize code fragments for each squad with team-size proportional length
+            // Initialize code fragments for each squad
             this.squads.forEach((squad, squadId) => {
-                this.codeFragments.set(squadId, this.generateCodeFragments(squad.players.length));
+                this.codeFragments.set(squadId, this.generateCodeFragments());
                 squad.setMinigame('signal_jammer');
-                squad.correctSymbol = Math.floor(Math.random() * 9);
             });
         }
 
@@ -249,178 +246,19 @@ class GameManager {
         this.drawings = [];
         this.codeFragments.clear();
         this.squadSize = 4; // Reset to default team size
-        this.tumblerStates.clear();
-        this.tumblerSyncStarts.clear();
     }
 
     /**
      * Generate random code fragments for the getaway phase
-     * Code length is proportional to team size: 2 chars per player
-     * @param {number} teamSize - The size of the team
      * @returns {Array}
      */
-    generateCodeFragments(teamSize) {
+    generateCodeFragments() {
         const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
         const fragments = [];
-        const codeLength = teamSize * 2; // 2 characters per team member
-        for (let i = 0; i < codeLength; i++) {
+        for (let i = 0; i < 4; i++) {
             fragments.push(chars[Math.floor(Math.random() * chars.length)]);
         }
         return fragments;
-    }
-
-    /**
-     * Get the maximum number of guesses for Signal Jammer
-     * Inversely proportional to team size: larger teams get fewer tries
-     * @param {number} teamSize
-     * @returns {number}
-     */
-    getSignalJammerMaxTries(teamSize) {
-        // Base: 10 tries for team of 2, decreasing by 1 for each additional member
-        // Minimum of 3 tries for large teams
-        return Math.max(3, 12 - teamSize);
-    }
-
-    /**
-     * Handle tumbler state update for a player
-     * Sync is only within their team
-     * @param {string} playerId
-     * @param {Object} state
-     * @returns {Object} sync status for the team
-     */
-    handleTumblerState(playerId, state) {
-        const player = this.players.get(playerId);
-        if (!player || !player.squad) return null;
-
-        const squadId = player.squad;
-        const squad = this.squads.get(squadId);
-        if (!squad) return null;
-
-        // Initialize tumbler state for this squad if needed
-        if (!this.tumblerStates.has(squadId)) {
-            this.tumblerStates.set(squadId, new Map());
-        }
-
-        const squadTumblerStates = this.tumblerStates.get(squadId);
-        const now = Date.now();
-
-        // Update this player's state
-        squadTumblerStates.set(playerId, {
-            atSweetSpot: state.atSweetSpot,
-            timestamp: now
-        });
-
-        // Clean up stale entries (players who haven't sent update in 2s)
-        for (const [id, s] of squadTumblerStates.entries()) {
-            if (now - s.timestamp > 2000) {
-                squadTumblerStates.delete(id);
-            }
-        }
-
-        // Count how many squad members are active and at sweet spot
-        const squadMembers = squad.players.filter(p => p.connected);
-        const activeCount = squadTumblerStates.size;
-        let playersAtSweetSpot = 0;
-
-        for (const [, s] of squadTumblerStates.entries()) {
-            if (s.atSweetSpot) playersAtSweetSpot++;
-        }
-
-        // All squad members must be at sweet spot
-        const allSynced = activeCount >= squadMembers.length && 
-                          playersAtSweetSpot === activeCount && 
-                          activeCount > 0;
-
-        if (allSynced) {
-            if (!this.tumblerSyncStarts.has(squadId)) {
-                this.tumblerSyncStarts.set(squadId, now);
-                console.log(`[TUMBLER] Squad ${squadId} all synced! Starting 3s timer...`);
-            }
-
-            const syncTime = (now - this.tumblerSyncStarts.get(squadId)) / 1000;
-
-            // If synced for 3 seconds, this squad advances!
-            if (syncTime >= 3) {
-                console.log(`[TUMBLER] Squad ${squadId} VAULT CRACKED!`);
-                this.tumblerSyncStarts.delete(squadId);
-                this.tumblerStates.delete(squadId);
-                // Set squad phase to getaway
-                squad.setPhase('getaway');
-                return {
-                    squadId,
-                    synced: true,
-                    syncTime: 3,
-                    playersReady: playersAtSweetSpot,
-                    totalPlayers: squadMembers.length,
-                    complete: true
-                };
-            }
-
-            return {
-                squadId,
-                synced: true,
-                syncTime,
-                playersReady: playersAtSweetSpot,
-                totalPlayers: squadMembers.length,
-                complete: false
-            };
-        } else {
-            // Not all synced - reset timer
-            if (this.tumblerSyncStarts.has(squadId)) {
-                console.log(`[TUMBLER] Squad ${squadId} sync broken - timer reset`);
-                this.tumblerSyncStarts.delete(squadId);
-            }
-
-            return {
-                squadId,
-                synced: false,
-                syncTime: 0,
-                playersReady: playersAtSweetSpot,
-                totalPlayers: squadMembers.length,
-                complete: false
-            };
-        }
-    }
-
-    /**
-     * Advance a specific squad to the next phase
-     * @param {string} squadId
-     * @param {string} phase - 'heist', 'getaway', 'complete'
-     */
-    advanceSquad(squadId, phase) {
-        const squad = this.squads.get(squadId);
-        if (!squad) return;
-
-        squad.setPhase(phase);
-        
-        if (phase === 'heist') {
-            // Generate code for this squad based on actual team size
-            this.codeFragments.set(squadId, this.generateCodeFragments(squad.players.length));
-            squad.setMinigame('signal_jammer');
-            squad.correctSymbol = Math.floor(Math.random() * 9);
-        }
-
-        console.log(`[SQUAD] ${squadId} advanced to ${phase}`);
-    }
-
-    /**
-     * Get squad info for a player
-     * @param {string} playerId
-     * @returns {Object|null}
-     */
-    getPlayerSquadInfo(playerId) {
-        const player = this.players.get(playerId);
-        if (!player || !player.squad) return null;
-
-        const squad = this.squads.get(player.squad);
-        if (!squad) return null;
-
-        return {
-            squadId: player.squad,
-            teamSize: squad.players.length,
-            maxTries: this.getSignalJammerMaxTries(squad.players.length),
-            codeLength: squad.players.length * 2
-        };
     }
 
     /**
@@ -485,72 +323,35 @@ class GameManager {
     handleSignalJammerGuess(playerId, symbolIndex) {
         const player = this.players.get(playerId);
         if (!player || !player.squad) {
-            return { success: false, reason: 'no_squad' };
+            return { success: false };
         }
 
         const squad = this.squads.get(player.squad);
-        if (!squad) return { success: false, reason: 'squad_not_found' };
-
-        // Check if squad is in heist phase
-        if (squad.currentPhase !== 'heist') {
-            return { success: false, reason: 'wrong_phase' };
-        }
-
-        // Get max tries for this team size
-        const maxTries = this.getSignalJammerMaxTries(squad.players.length);
-
-        // Check if team has exceeded max tries
-        if (!squad.canGuessSignalJammer(maxTries)) {
-            return { success: false, reason: 'max_tries_exceeded', maxTries, guesses: squad.signalJammerGuesses };
-        }
+        if (!squad) return { success: false };
 
         // The correct symbol is stored per squad
         const correctSymbol = squad.correctSymbol || 0;
 
         if (symbolIndex === correctSymbol) {
             squad.updateProgress(25);
-            return { success: true, squadProgress: squad.progress, squadId: player.squad };
+            return { success: true, squadProgress: squad.progress };
         }
 
-        // Record wrong guess
-        squad.recordWrongGuess();
-        const triesLeft = maxTries - squad.signalJammerGuesses;
-
-        return { 
-            success: false, 
-            squadId: player.squad, 
-            reason: 'wrong_symbol',
-            triesLeft,
-            maxTries
-        };
+        return { success: false, squadId: player.squad };
     }
 
     /**
      * Verify final code for getaway phase
      * @param {string} squadId
      * @param {string} code
-     * @returns {{ success: boolean, reason?: string }}
+     * @returns {boolean}
      */
     verifyCode(squadId, code) {
-        const squad = this.squads.get(squadId);
-        if (!squad) return { success: false, reason: 'squad_not_found' };
-
-        // Check if squad is in getaway phase
-        if (squad.currentPhase !== 'getaway') {
-            return { success: false, reason: 'wrong_phase' };
-        }
-
         const fragments = this.codeFragments.get(squadId);
-        if (!fragments) return { success: false, reason: 'no_code' };
+        if (!fragments) return false;
 
         const correctCode = fragments.join('');
-        const isCorrect = code.toUpperCase() === correctCode;
-
-        if (isCorrect) {
-            squad.setPhase('complete');
-        }
-
-        return { success: isCorrect };
+        return code.toUpperCase() === correctCode;
     }
 
     /**

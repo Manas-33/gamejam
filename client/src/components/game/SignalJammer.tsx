@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore } from '../../store/useGameStore';
 
@@ -29,15 +29,7 @@ const DEV_CLUES = [
     "The symbol is in the bottom half",
 ];
 
-interface SquadInfo {
-    squadId: string | null;
-    teamSize: number;
-    maxTries: number;
-    codeLength: number;
-}
-
 export function SignalJammer() {
-    const socket = useGameStore((s) => s.socket);
     const setView = useGameStore((s) => s.setView);
     const triggerSuccess = useGameStore((s) => s.triggerSuccess);
     const triggerError = useGameStore((s) => s.triggerError);
@@ -48,18 +40,6 @@ export function SignalJammer() {
     const [wrongGuesses, setWrongGuesses] = useState<Set<number>>(new Set());
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [solved, setSolved] = useState(false);
-    const [squadInfo, setSquadInfo] = useState<SquadInfo>({ squadId: null, teamSize: 4, maxTries: 8, codeLength: 4 });
-    const [serverTriesLeft, setServerTriesLeft] = useState<number | null>(null);
-
-    // Fetch squad info for team-size based max tries
-    useEffect(() => {
-        if (socket) {
-            socket.emit('get_squad_info', (info: SquadInfo) => {
-                console.log('[SIGNAL_JAMMER] Squad info:', info);
-                setSquadInfo(info);
-            });
-        }
-    }, [socket]);
 
     // DEV: Pick a random clue on mount
     const clue = useMemo(() => {
@@ -75,79 +55,40 @@ export function SignalJammer() {
         setSelectedIndex(index);
         setIsSubmitting(true);
 
-        // Send guess to server for validation
-        if (socket) {
-            socket.emit('signal_jammer_guess', { symbolIndex: index }, (response: { 
-                success: boolean; 
-                reason?: string;
-                triesLeft?: number;
-                maxTries?: number;
-            }) => {
-                if (response.success) {
-                    triggerSuccess();
-                    setSolved(true);
+        // Simulate network delay
+        await new Promise(resolve => setTimeout(resolve, 300));
 
-                    // Haptic feedback for success
-                    if (navigator.vibrate) {
-                        navigator.vibrate([50, 50, 100, 50, 150]);
-                    }
+        // DEV: Check against hardcoded correct answer
+        if (index === CORRECT_SYMBOL) {
+            triggerSuccess();
+            setSolved(true);
 
-                    // Advance to next minigame after delay
-                    setTimeout(() => {
-                        setView('tumbler');
-                    }, 1500);
-                } else {
-                    // Wrong guess
-                    setWrongGuesses((prev) => new Set([...prev, index]));
-                    triggerError();
-
-                    // Update tries left from server (authoritative)
-                    if (response.triesLeft !== undefined) {
-                        setServerTriesLeft(response.triesLeft);
-                    }
-                    if (response.maxTries !== undefined) {
-                        setSquadInfo(prev => ({ 
-                            ...prev, 
-                            maxTries: response.maxTries! 
-                        }));
-                    }
-
-                    // Haptic feedback for error
-                    if (navigator.vibrate) {
-                        navigator.vibrate([100, 50, 100]);
-                    }
-
-                    // Check if max tries exceeded
-                    if (response.reason === 'max_tries_exceeded') {
-                        console.log('[SIGNAL_JAMMER] Max tries exceeded!');
-                    }
-                }
-
-                setIsSubmitting(false);
-                setSelectedIndex(null);
-            });
-        } else {
-            // Fallback local check (DEV mode)
-            await new Promise(resolve => setTimeout(resolve, 300));
-            if (index === CORRECT_SYMBOL) {
-                triggerSuccess();
-                setSolved(true);
-                if (navigator.vibrate) navigator.vibrate([50, 50, 100, 50, 150]);
-                setTimeout(() => setView('tumbler'), 1500);
-            } else {
-                setWrongGuesses((prev) => new Set([...prev, index]));
-                triggerError();
-                if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+            // Haptic feedback for success
+            if (navigator.vibrate) {
+                navigator.vibrate([50, 50, 100, 50, 150]);
             }
-            setIsSubmitting(false);
-            setSelectedIndex(null);
-        }
-    }, [wrongGuesses, isSubmitting, solved, triggerSuccess, triggerError, setView, socket]);
 
-    // Max tries inversely proportional to team size (from server)
-    const maxTries = squadInfo.maxTries;
-    // Use server-provided triesLeft if available (authoritative), otherwise calculate locally
-    const triesLeft = serverTriesLeft !== null ? serverTriesLeft : maxTries - wrongGuesses.size;
+            // Advance to next minigame after delay
+            setTimeout(() => {
+                setView('tumbler');
+            }, 1500);
+        } else {
+            // Wrong guess
+            setWrongGuesses((prev) => new Set([...prev, index]));
+            triggerError();
+
+            // Haptic feedback for error
+            if (navigator.vibrate) {
+                navigator.vibrate([100, 50, 100]);
+            }
+        }
+
+        setIsSubmitting(false);
+        setSelectedIndex(null);
+    }, [wrongGuesses, isSubmitting, solved, triggerSuccess, triggerError, setView]);
+
+    const maxTries = 8;
+    const triesLeft = maxTries - wrongGuesses.size;
 
     return (
         <motion.div
@@ -323,9 +264,6 @@ export function SignalJammer() {
                 </p>
                 <p className="text-cyan-400/60 text-xs">
                     Share information verbally to crack the code.
-                </p>
-                <p className="text-pink-400/60 text-xs mt-1">
-                    Team of {squadInfo.teamSize}: {maxTries} tries allowed
                 </p>
             </motion.div>
         </motion.div>

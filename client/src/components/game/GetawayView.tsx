@@ -2,10 +2,12 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore } from '../../store/useGameStore';
 
+// The correct extraction code
+const EXTRACTION_CODE = 'A3F7';
+
 interface Fragment {
     char: string;
     position: number;
-    codeLength: number;
 }
 
 export function GetawayView() {
@@ -21,7 +23,6 @@ export function GetawayView() {
     const [wrongAttempts, setWrongAttempts] = useState(0);
     const [completed, setCompleted] = useState(false);
     const [myFragment, setMyFragment] = useState<Fragment | null>(null);
-    const [codeLength, setCodeLength] = useState(4);
 
     // Request unique fragment from server
     useEffect(() => {
@@ -29,9 +30,6 @@ export function GetawayView() {
             socket.emit('get_fragment', (fragment: Fragment) => {
                 console.log('[GETAWAY] Received fragment:', fragment);
                 setMyFragment(fragment);
-                if (fragment.codeLength) {
-                    setCodeLength(fragment.codeLength);
-                }
             });
         }
     }, [socket, myFragment]);
@@ -57,42 +55,37 @@ export function GetawayView() {
     }, [socket, triggerSuccess]);
 
     const handleSubmit = async () => {
-        if (code.length !== codeLength || isSubmitting || completed) return;
+        if (code.length !== 4 || isSubmitting || completed) return;
 
         setIsSubmitting(true);
 
-        // Verify code with server
-        if (socket) {
-            socket.emit('verify_code', { code: code.toUpperCase() }, (response: { success: boolean }) => {
-                if (response.success) {
-                    triggerSuccess();
-                    setCompleted(true);
+        // Check locally against correct code
+        if (code.toUpperCase() === EXTRACTION_CODE) {
+            triggerSuccess();
+            setCompleted(true);
 
-                    if (navigator.vibrate) {
-                        navigator.vibrate([50, 50, 100, 50, 150]);
-                    }
+            if (navigator.vibrate) {
+                navigator.vibrate([50, 50, 100, 50, 150]);
+            }
 
-                    // Notify all players of success
-                    setTimeout(() => {
-                        squadAdvance('complete');
-                    }, 1000);
-                } else {
-                    setWrongAttempts((prev) => prev + 1);
-                    triggerError();
-
-                    if (navigator.vibrate) {
-                        navigator.vibrate([100, 50, 100, 50, 100]);
-                    }
-                }
-                setIsSubmitting(false);
-            });
+            // Notify all players of success
+            setTimeout(() => {
+                squadAdvance('complete');
+            }, 1000);
         } else {
-            setIsSubmitting(false);
+            setWrongAttempts((prev) => prev + 1);
+            triggerError();
+
+            if (navigator.vibrate) {
+                navigator.vibrate([100, 50, 100, 50, 100]);
+            }
         }
+
+        setIsSubmitting(false);
     };
 
     const handleKeyInput = (char: string) => {
-        if (code.length < codeLength && !completed) {
+        if (code.length < 4 && !completed) {
             setCode((prev) => prev + char);
             if (navigator.vibrate) {
                 navigator.vibrate(20);
@@ -107,9 +100,8 @@ export function GetawayView() {
     const keypad = [
         ['A', 'B', 'C', 'D'],
         ['E', 'F', 'G', 'H'],
-        ['0', '1', '2', '3'],
-        ['4', '5', '6', '7'],
-        ['8', '9', 'I', 'J'],
+        ['1', '2', '3', '4'],
+        ['5', '6', '7', '8'],
     ];
 
     return (
@@ -192,7 +184,7 @@ export function GetawayView() {
                 className="bg-yellow-500/10 border border-yellow-400/30 p-3 mb-4 text-center"
             >
                 <p className="text-yellow-400 text-xs">
-                    💡 The full code is {codeLength} characters. Ask each player for their fragment!
+                    💡 The full code is 4 characters. Ask each player for their fragment!
                 </p>
             </motion.div>
 
@@ -211,11 +203,11 @@ export function GetawayView() {
 
                     <div className="flex items-center gap-1">
                         <span className="text-slate-500">CODE:</span>
-                        <div className="flex gap-1 ml-2 flex-wrap justify-center">
-                            {Array.from({ length: codeLength }).map((_, i) => (
+                        <div className="flex gap-2 ml-2">
+                            {Array.from({ length: 4 }).map((_, i) => (
                                 <motion.div
                                     key={i}
-                                    className={`w-10 h-12 border-2 flex items-center justify-center text-xl font-bold
+                                    className={`w-12 h-14 border-2 flex items-center justify-center text-2xl font-bold
                                     ${code[i]
                                             ? 'border-green-400 text-green-400'
                                             : 'border-slate-600 text-slate-600'
@@ -281,7 +273,7 @@ export function GetawayView() {
                     <motion.button
                         whileTap={{ scale: 0.95 }}
                         onClick={handleSubmit}
-                        disabled={code.length !== codeLength || isSubmitting || completed}
+                        disabled={code.length !== 4 || isSubmitting || completed}
                         className="py-3 text-lg font-bold bg-green-500/20 border border-green-400 
                                    text-green-400 hover:bg-green-400/30 disabled:opacity-50"
                     >
