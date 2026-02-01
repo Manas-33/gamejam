@@ -75,3 +75,9 @@ The frontend proxies Socket.io requests to the backend server.
 - Updated Squad.js to enforce exact team sizes (no overflow)
 - Integrated YouTube tutorial briefing modal
 - Optimized Socket.io for 100+ concurrent connections
+
+### Team-Based Minigame Updates
+- **Independent Team Progression**: Teams that complete their chain phase faster can proceed to heist without waiting for others
+- **Tumbler Sync**: Sweet spot synchronization now only works within team members (not across all players)
+- **Signal Jammer Tries**: Number of guesses is inversely proportional to team size (team of 2 = 10 tries, team of 10 = 3 tries)
+- **Getaway Code Length**: Code length is 2 characters per team member (team of 4 = 8 chars), randomized per team

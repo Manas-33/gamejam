@@ -139,6 +139,8 @@ export const useGameStore = create<GameState>((set, get) => ({
             if (data.phase === 'chain') {
                 set({ currentView: 'scanner' });
                 get().getTarget();
+                // Join squad room for team-based communications
+                socket.emit('join_squad_room');
             } else if (data.phase === 'heist') {
                 set({ currentView: 'signal_jammer' });
                 get().getClue();
