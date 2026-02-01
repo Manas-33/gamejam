@@ -116,13 +116,13 @@ io.on('connection', (socket) => {
 
         if (result.success) {
             const squad = gameManager.squads.get(result.squadId);
-            
+
             // Notify ALL squad members about scan progress (emit to each player directly)
             if (squad) {
                 const confirmedCount = squad.getCompletedScans();
                 const totalCount = squad.players.length;
                 const allConfirmed = confirmedCount === totalCount;
-                
+
                 squad.players.forEach(p => {
                     io.to(p.id).emit('scan_complete', {
                         scannerId: socket.id,
@@ -234,20 +234,20 @@ io.on('connection', (socket) => {
 
             // Emit to each squad player directly with their result
             squad.players.forEach(p => {
-                io.to(p.id).emit('heist_complete', { 
-                    position, 
-                    totalSquads, 
+                io.to(p.id).emit('heist_complete', {
+                    position,
+                    totalSquads,
                     isWinner,
                     tasksCompleted: squad.tasksCompleted
                 });
             });
-            
-            io.to('gm').emit('squad_completed', { 
-                squadId: player.squad, 
-                position, 
-                totalSquads 
+
+            io.to('gm').emit('squad_completed', {
+                squadId: player.squad,
+                position,
+                totalSquads
             });
-            
+
             // Broadcast updated leaderboard
             io.to('gm').emit('leaderboard_update', gameManager.getLeaderboard());
 
@@ -275,7 +275,7 @@ io.on('connection', (socket) => {
         const allConfirmed = squad.players.every(p => p.scanComplete);
         if (!allConfirmed) {
             console.log(`[SQUAD_ADVANCE] Squad ${player.squad} not all confirmed yet`);
-            socket.emit('squad_advance_denied', { 
+            socket.emit('squad_advance_denied', {
                 message: 'Waiting for all squad members to confirm their targets',
                 confirmedCount: squad.getCompletedScans(),
                 totalCount: squad.players.length
@@ -284,15 +284,15 @@ io.on('connection', (socket) => {
         }
 
         console.log(`[SQUAD_ADVANCE] Squad ${player.squad} advancing to: ${data.view}`);
-        
+
         // Track the view change
         squad.setView(data.view);
-        
+
         // Only broadcast to THIS squad's players
         squad.players.forEach(p => {
             io.to(p.id).emit('view_change', { view: data.view });
         });
-        
+
         // Broadcast updated leaderboard to GM
         io.to('gm').emit('leaderboard_update', gameManager.getLeaderboard());
     });
@@ -313,10 +313,10 @@ io.on('connection', (socket) => {
         }
 
         const squadId = player.squad;
-        
+
         // Get code from GameManager (generated during heist phase with team-size scaling)
         let codeFragments = gameManager.codeFragments.get(squadId);
-        
+
         // If code doesn't exist yet, generate it now (handles squad_advance skipping global phase)
         if (!codeFragments || codeFragments.length === 0) {
             const teamSize = squad.players.length;
@@ -366,6 +366,49 @@ io.on('connection', (socket) => {
         console.log(`[FRAGMENT] Squad ${squadId}: Assigned position ${assignment.position}/${codeLength} (${assignment.char}) to ${socket.id}`);
 
         callback(assignment);
+    });
+
+    // Get tumbler configuration (random sweet spot angle per player) - PER SQUAD
+    socket.on('get_tumbler_config', (callback) => {
+        const player = gameManager.players.get(socket.id);
+        if (!player || !player.squad) {
+            callback({ sweetSpotAngle: 45 }); // fallback
+            return;
+        }
+
+        const squad = gameManager.squads.get(player.squad);
+        if (!squad) {
+            callback({ sweetSpotAngle: 45 }); // fallback
+            return;
+        }
+
+        const squadId = player.squad;
+
+        // Initialize per-squad tumbler angle tracking
+        if (!global.squadTumblerAngles) {
+            global.squadTumblerAngles = new Map(); // squadId -> Map of player angles
+        }
+
+        if (!global.squadTumblerAngles.has(squadId)) {
+            global.squadTumblerAngles.set(squadId, new Map());
+        }
+
+        const squadAngles = global.squadTumblerAngles.get(squadId);
+
+        // Check if player already has an assigned angle
+        if (squadAngles.has(socket.id)) {
+            const angle = squadAngles.get(socket.id);
+            console.log(`[TUMBLER] Player ${socket.id} retrieving existing angle: ${angle}°`);
+            callback({ sweetSpotAngle: angle });
+            return;
+        }
+
+        // Generate a random angle between 0 and 359
+        const randomAngle = Math.floor(Math.random() * 360);
+        squadAngles.set(socket.id, randomAngle);
+        console.log(`[TUMBLER] Squad ${squadId}: Assigned angle ${randomAngle}° to player ${socket.id}`);
+
+        callback({ sweetSpotAngle: randomAngle });
     });
 
     // Tumbler state tracking for sync - PER SQUAD
@@ -436,7 +479,7 @@ io.on('connection', (socket) => {
                 console.log(`[TUMBLER] Squad ${squadId} VAULT CRACKED! All players held for 3s!`);
                 global.squadTumblerSyncStart.delete(squadId);
                 global.squadTumblerStates.delete(squadId);
-                
+
                 // Advance only this squad
                 squad.players.forEach(p => {
                     io.to(p.id).emit('view_change', { view: 'getaway' });
@@ -519,12 +562,13 @@ gmNamespace.on('connection', (socket) => {
 
     socket.on('reset_game', () => {
         gameManager.resetGame();
-        
+
         // Clear all per-squad global state
         if (global.squadTumblerStates) global.squadTumblerStates.clear();
         if (global.squadTumblerSyncStart) global.squadTumblerSyncStart.clear();
         if (global.squadFragments) global.squadFragments.clear();
-        
+        if (global.squadTumblerAngles) global.squadTumblerAngles.clear();
+
         io.emit('game_reset');
         gmNamespace.emit('game_state', gameManager.getGameState());
     });

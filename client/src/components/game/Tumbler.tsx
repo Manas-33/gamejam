@@ -3,7 +3,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore } from '../../store/useGameStore';
 
 interface TumblerProps {
-    sweetSpotAngle?: number;
     sweetSpotRange?: number;
 }
 
@@ -15,13 +14,16 @@ interface SyncState {
 }
 
 export function Tumbler({
-    sweetSpotAngle = 45,
     sweetSpotRange = 20,
 }: TumblerProps) {
     const socket = useGameStore((s) => s.socket);
     const triggerSuccess = useGameStore((s) => s.triggerSuccess);
     const showSuccess = useGameStore((s) => s.showSuccess);
     const showError = useGameStore((s) => s.showError);
+
+    // Sweet spot angle fetched from server
+    const [sweetSpotAngle, setSweetSpotAngle] = useState<number | null>(null);
+    const [loading, setLoading] = useState(true);
 
     // Refs for 60fps performance
     const dialRef = useRef<HTMLDivElement>(null);
@@ -40,8 +42,20 @@ export function Tumbler({
     const [completed, setCompleted] = useState(false);
     const [permissionGranted, setPermissionGranted] = useState(false);
 
+    // Fetch sweet spot angle from server on mount
+    useEffect(() => {
+        if (socket) {
+            socket.emit('get_tumbler_config', (data: { sweetSpotAngle: number }) => {
+                console.log('[TUMBLER] Received sweet spot angle:', data.sweetSpotAngle);
+                setSweetSpotAngle(data.sweetSpotAngle);
+                setLoading(false);
+            });
+        }
+    }, [socket]);
+
     // Check if angle is in sweet spot
     const checkSweetSpot = useCallback((angle: number) => {
+        if (sweetSpotAngle === null) return false;
         const normalizedAngle = ((angle % 360) + 360) % 360;
         const normalizedSweet = ((sweetSpotAngle % 360) + 360) % 360;
 
@@ -161,10 +175,22 @@ export function Tumbler({
     }, [handleOrientation, socket, completed, triggerSuccess]);
 
     const sweetSpotStyle = {
-        transform: `rotate(${sweetSpotAngle}deg)`,
+        transform: `rotate(${sweetSpotAngle ?? 0}deg)`,
     };
 
     const { synced, syncTime, playersReady, totalPlayers } = syncState;
+
+    // Loading screen while fetching sweet spot angle
+    if (loading || sweetSpotAngle === null) {
+        return (
+            <div className="min-h-screen bg-slate-900 cyber-grid flex items-center justify-center">
+                <div className="text-center">
+                    <div className="w-12 h-12 border-4 border-pink-400 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+                    <p className="text-pink-400 font-mono tracking-widest">CALIBRATING TUMBLER...</p>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <motion.div
@@ -213,8 +239,8 @@ export function Tumbler({
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 className={`mb-4 px-6 py-3 rounded-lg border-2 ${synced
-                        ? 'bg-green-500/20 border-green-400'
-                        : 'bg-slate-800/50 border-slate-600'
+                    ? 'bg-green-500/20 border-green-400'
+                    : 'bg-slate-800/50 border-slate-600'
                     }`}
             >
                 <div className="text-center">
