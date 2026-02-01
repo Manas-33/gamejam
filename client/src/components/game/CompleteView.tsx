@@ -4,10 +4,22 @@ import { useGameStore } from '../../store/useGameStore';
 export function CompleteView() {
     const heistResult = useGameStore((state) => state.heistResult);
     
-    const isWinner = heistResult?.isWinner ?? false;
-    const position = heistResult?.position ?? 1;
-    const totalSquads = heistResult?.totalSquads ?? 1;
-    const tasksCompleted = heistResult?.tasksCompleted ?? 3;
+    // If no result yet, show loading state
+    if (!heistResult) {
+        return (
+            <div className="min-h-screen bg-slate-900 cyber-grid flex flex-col items-center justify-center p-4">
+                <div className="text-center">
+                    <div className="text-4xl mb-4 animate-pulse">⏳</div>
+                    <p className="text-cyan-400 text-xl tracking-wider">CALCULATING RESULTS...</p>
+                </div>
+            </div>
+        );
+    }
+    
+    const isWinner = heistResult.isWinner;
+    const position = heistResult.position;
+    const totalSquads = heistResult.totalSquads;
+    const tasksCompleted = heistResult.tasksCompleted;
 
     const getPositionSuffix = (pos: number) => {
         if (pos === 1) return 'st';

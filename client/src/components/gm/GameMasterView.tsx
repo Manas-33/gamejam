@@ -152,7 +152,7 @@ export function GameMasterView() {
 
     const resetGame = useCallback(() => {
         socket?.emit('reset_game');
-        setGameState((prev) => ({ ...prev, phase: 'start', playerCount: 0, drawings: [], squads: [] }));
+        setGameState((prev) => ({ ...prev, phase: 'start', playerCount: 0, drawings: [], squads: [], leaderboard: [] }));
     }, [socket]);
 
     const updateTeamSize = useCallback((delta: number) => {

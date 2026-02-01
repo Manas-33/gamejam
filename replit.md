@@ -89,3 +89,11 @@ The frontend proxies Socket.io requests to the backend server.
   - Each team gets a unique randomized code
   - Only uses keypad characters (A-H, 1-8)
   - Server-side code verification (no hardcoded codes)
+- **Leaderboard & End-Game Messaging**:
+  - Central Command shows real-time leaderboard with bank map visualization
+  - Teams progress through phases like a bar chart race
+  - First team to complete gets "HEIST COMPLETE" with trophy
+  - Other teams get "HEIST FAILURE" with their position (2nd, 3rd, etc.)
+  - Position based on finish order, with tasks completed as secondary metric
+  - Squad.js tracks currentView, completedAt, finishPosition, tasksCompleted
+  - Leaderboard updates broadcast to GM on squad_advance and verify_code
