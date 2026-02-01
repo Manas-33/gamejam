@@ -21,14 +21,24 @@ const PROMPTS = [
 class GameManager {
     constructor(io) {
         this.io = io;
-        this.phase = 'lobby'; // lobby, chain, heist, getaway
+        this.phase = 'start'; // start, tutorial, lobby, chain, heist, getaway, complete
         this.players = new Map(); // socketId -> player data
         this.squads = new Map(); // squadId -> Squad instance
         this.drawings = []; // All submitted drawings for GM view
         this.codeFragments = new Map(); // squadId -> array of code fragments
-        this.maxPlayers = 50;
-        this.squadSize = 4;
+        this.maxPlayers = 100;
+        this.squadSize = 4; // configurable team size
         this.gracePeriodsMs = 30000;
+    }
+
+    /**
+     * Set the team size
+     * @param {number} size
+     */
+    setTeamSize(size) {
+        if (size >= 2 && size <= 10) {
+            this.squadSize = size;
+        }
     }
 
     /**
@@ -87,47 +97,44 @@ class GameManager {
     /**
      * Assign all registered players into circular squads
      * Called when game starts (transitions from lobby to chain phase)
+     * Assumes canStartGame() validation has passed (playerCount divisible by squadSize)
      */
     formSquads() {
         const playerList = Array.from(this.players.values());
 
-        // Shuffle players randomly
+        // Shuffle players randomly using Fisher-Yates
         for (let i = playerList.length - 1; i > 0; i--) {
             const j = Math.floor(Math.random() * (i + 1));
             [playerList[i], playerList[j]] = [playerList[j], playerList[i]];
         }
 
-        // Form squads of squadSize players
-        let squadIndex = 0;
+        // Clear any existing squads
+        this.squads.clear();
 
-        for (let i = 0; i < playerList.length; i += this.squadSize) {
-            const squadId = `squad_${squadIndex + 1}`;
-            const squad = new Squad(squadId);
-
-            const slice = playerList.slice(i, Math.min(i + this.squadSize, playerList.length));
-
-            // Only form a squad if we have at least the minimum size
-            if (slice.length >= 4) {
-                slice.forEach(player => {
-                    squad.addPlayer(player);
-                    player.squad = squadId;
-                    this.players.set(player.id, player);
-                });
-
-                this.squads.set(squadId, squad);
-                squadIndex++;
-            } else {
-                // Distribute remaining players to existing squads
-                slice.forEach((player, idx) => {
-                    const targetSquadId = `squad_${(idx % squadIndex) + 1}`;
-                    const targetSquad = this.squads.get(targetSquadId);
-                    if (targetSquad && targetSquad.players.length < 5) {
-                        targetSquad.addPlayer(player);
-                        player.squad = targetSquadId;
-                        this.players.set(player.id, player);
-                    }
-                });
+        // Form squads of exactly squadSize players
+        const numSquads = Math.floor(playerList.length / this.squadSize);
+        
+        for (let squadIdx = 0; squadIdx < numSquads; squadIdx++) {
+            const squadId = `squad_${squadIdx + 1}`;
+            const squad = new Squad(squadId, this.squadSize);
+            
+            const startIdx = squadIdx * this.squadSize;
+            const endIdx = startIdx + this.squadSize;
+            
+            for (let i = startIdx; i < endIdx; i++) {
+                const player = playerList[i];
+                squad.addPlayer(player);
+                player.squad = squadId;
+                this.players.set(player.id, player);
             }
+            
+            this.squads.set(squadId, squad);
+        }
+
+        // Sanity check: verify all players assigned and squad sizes are correct
+        console.log(`[SQUADS] Formed ${this.squads.size} squads of ${this.squadSize} players each`);
+        for (const [squadId, squad] of this.squads) {
+            console.log(`  ${squadId}: ${squad.players.length} players`);
         }
     }
 
@@ -147,6 +154,7 @@ class GameManager {
         if (!target) return null;
 
         return {
+            id: target.id,
             drawing: target.drawing,
             tell: target.tell,
             prompt: target.prompt,
@@ -185,36 +193,148 @@ class GameManager {
     }
 
     /**
+     * Validate if game can start with current player count and team size
+     * @returns {{ valid: boolean, message: string }}
+     */
+    canStartGame() {
+        const count = this.players.size;
+        if (count < this.squadSize) {
+            return { valid: false, message: `Need at least ${this.squadSize} players` };
+        }
+        if (count % this.squadSize !== 0) {
+            const needed = this.squadSize - (count % this.squadSize);
+            return { valid: false, message: `Need ${needed} more players for even teams` };
+        }
+        return { valid: true, message: 'Ready to start' };
+    }
+
+    /**
      * Transition to a new phase
      * @param {string} newPhase
+     * @returns {{ success: boolean, message?: string }}
      */
     setPhase(newPhase) {
-        this.phase = newPhase;
-
+        // Server-side validation for chain phase
         if (newPhase === 'chain') {
+            const validation = this.canStartGame();
+            if (!validation.valid) {
+                return { success: false, message: validation.message };
+            }
             this.formSquads();
         }
+        
+        this.phase = newPhase;
 
         if (newPhase === 'heist') {
             // Initialize code fragments for each squad
+            // Code length is based on squad size (1 char per player)
             this.squads.forEach((squad, squadId) => {
-                this.codeFragments.set(squadId, this.generateCodeFragments());
+                const teamSize = squad.players.length;
+                this.codeFragments.set(squadId, this.generateCodeFragments(teamSize));
                 squad.setMinigame('signal_jammer');
+                squad.setView('signal_jammer');
+            });
+            
+            // Broadcast initial leaderboard
+            this.io.to('gm').emit('leaderboard_update', this.getLeaderboard());
+        }
+
+        if (newPhase === 'getaway') {
+            // Generate codes if they weren't already generated during heist
+            // This handles edge cases like skipping directly to getaway
+            this.squads.forEach((squad, squadId) => {
+                if (!this.codeFragments.has(squadId)) {
+                    const teamSize = squad.players.length;
+                    this.codeFragments.set(squadId, this.generateCodeFragments(teamSize));
+                    console.log(`[GETAWAY] Generated fallback code for ${squadId}: ${this.codeFragments.get(squadId).join('')}`);
+                }
             });
         }
 
         this.io.emit('phase_change', { phase: newPhase });
+        return { success: true };
+    }
+
+    /**
+     * Reset the game to initial state
+     */
+    resetGame() {
+        this.phase = 'start';
+        this.players.clear();
+        this.squads.clear();
+        this.drawings = [];
+        this.codeFragments.clear();
+        this.squadSize = 4; // Reset to default team size
+        // Reset global finish counter and squad fragments
+        global.finishCounter = 0;
+        global.squadFragments = new Map();
+    }
+
+    /**
+     * Get leaderboard data showing all squads' progress
+     * @returns {Array} Sorted array of squad progress data
+     */
+    getLeaderboard() {
+        const squadNames = ['ALPHA', 'BRAVO', 'CHARLIE', 'DELTA', 'ECHO', 'FOXTROT', 'GOLF', 'HOTEL', 'INDIA', 'JULIET'];
+        const leaderboard = [];
+        let index = 0;
+        
+        this.squads.forEach((squad, squadId) => {
+            // Calculate progress percentage based on view
+            let progressPercent = 0;
+            switch (squad.currentView) {
+                case 'lobby': progressPercent = 0; break;
+                case 'chain': progressPercent = 10; break;
+                case 'scanner': progressPercent = 15; break;
+                case 'waiting': progressPercent = 20; break;
+                case 'signal_jammer': progressPercent = 30; break;
+                case 'tumbler': progressPercent = 50; break;
+                case 'getaway': progressPercent = 75; break;
+                case 'complete': progressPercent = 100; break;
+                default: progressPercent = 0;
+            }
+            
+            leaderboard.push({
+                id: squadId,
+                name: squadNames[index] || `SQUAD ${index + 1}`,
+                currentView: squad.currentView,
+                progressPercent,
+                tasksCompleted: squad.tasksCompleted,
+                finishPosition: squad.finishPosition,
+                completedAt: squad.completedAt,
+                playerCount: squad.players.length,
+                isComplete: squad.finishPosition !== null,
+            });
+            index++;
+        });
+        
+        // Sort: completed squads by position, then incomplete by progress
+        leaderboard.sort((a, b) => {
+            if (a.isComplete && b.isComplete) {
+                return a.finishPosition - b.finishPosition;
+            }
+            if (a.isComplete) return -1;
+            if (b.isComplete) return 1;
+            return b.progressPercent - a.progressPercent;
+        });
+        
+        return leaderboard;
     }
 
     /**
      * Generate random code fragments for the getaway phase
+     * Code length scales with team size: 1 character per player
+     * Uses only characters available on the keypad: A-H and 1-8
+     * @param {number} teamSize - Number of players in the squad
      * @returns {Array}
      */
-    generateCodeFragments() {
-        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    generateCodeFragments(teamSize) {
+        // Only use characters that appear on the keypad
+        const keypadChars = 'ABCDEFGH12345678';
+        const codeLength = teamSize; // 1 character per player
         const fragments = [];
-        for (let i = 0; i < 4; i++) {
-            fragments.push(chars[Math.floor(Math.random() * chars.length)]);
+        for (let i = 0; i < codeLength; i++) {
+            fragments.push(keypadChars[Math.floor(Math.random() * keypadChars.length)]);
         }
         return fragments;
     }
@@ -237,8 +357,10 @@ class GameManager {
             playerCount: this.players.size,
             maxPlayers: this.maxPlayers,
             squadCount: this.squads.size,
+            teamSize: this.squadSize,
             drawings: this.drawings,
             squads: this.getAllSquadStatuses(),
+            leaderboard: this.getLeaderboard(),
         };
     }
 

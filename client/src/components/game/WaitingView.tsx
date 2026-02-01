@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useGameStore } from '../../store/useGameStore';
 import { Button } from '../ui/Button';
@@ -5,18 +6,31 @@ import { Button } from '../ui/Button';
 export function WaitingView() {
     const phase = useGameStore((s) => s.phase);
     const player = useGameStore((s) => s.player);
+    const target = useGameStore((s) => s.target);
+    const squadStatus = useGameStore((s) => s.squadStatus);
     const squadAdvance = useGameStore((s) => s.squadAdvance);
+    const getSquadStatus = useGameStore((s) => s.getSquadStatus);
+    const showError = useGameStore((s) => s.showError);
 
-    // When clicked, ALL squad members advance to signal_jammer
+    useEffect(() => {
+        if (phase === 'chain') {
+            getSquadStatus();
+        }
+    }, [phase, getSquadStatus]);
+
     const handleStartHeist = () => {
         squadAdvance('signal_jammer');
     };
+
+    const allConfirmed = squadStatus?.allConfirmed ?? false;
+    const confirmedCount = squadStatus?.confirmedCount ?? 0;
+    const totalCount = squadStatus?.totalCount ?? 0;
 
     return (
         <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="min-h-screen bg-slate-900 cyber-grid flex flex-col items-center justify-center p-4"
+            className={`min-h-screen bg-slate-900 cyber-grid flex flex-col items-center justify-center p-4 ${showError ? 'shake' : ''}`}
         >
             {/* Animated background elements */}
             <div className="absolute inset-0 overflow-hidden pointer-events-none">
@@ -43,30 +57,29 @@ export function WaitingView() {
             <motion.div
                 initial={{ scale: 0.9, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
-                className="text-center relative z-10"
+                className="text-center relative z-10 w-full max-w-sm"
             >
-                {/* Status icon */}
-                <motion.div
-                    animate={{
-                        rotate: [0, 360],
-                        borderColor: ['#22d3ee', '#f472b6', '#22d3ee'],
-                    }}
-                    transition={{
-                        rotate: { duration: 8, repeat: Infinity, ease: 'linear' },
-                        borderColor: { duration: 3, repeat: Infinity },
-                    }}
-                    className="w-24 h-24 border-4 border-cyan-400 rounded-full mx-auto mb-8 flex items-center justify-center"
-                >
-                    <motion.div
-                        animate={{ scale: [1, 1.2, 1] }}
-                        transition={{ duration: 2, repeat: Infinity }}
-                        className="w-4 h-4 bg-cyan-400 rounded-full"
-                    />
-                </motion.div>
-
                 {/* Messages based on phase */}
                 {phase === 'lobby' && (
                     <>
+                        {/* Status icon */}
+                        <motion.div
+                            animate={{
+                                rotate: [0, 360],
+                                borderColor: ['#22d3ee', '#f472b6', '#22d3ee'],
+                            }}
+                            transition={{
+                                rotate: { duration: 8, repeat: Infinity, ease: 'linear' },
+                                borderColor: { duration: 3, repeat: Infinity },
+                            }}
+                            className="w-24 h-24 border-4 border-cyan-400 rounded-full mx-auto mb-8 flex items-center justify-center"
+                        >
+                            <motion.div
+                                animate={{ scale: [1, 1.2, 1] }}
+                                transition={{ duration: 2, repeat: Infinity }}
+                                className="w-4 h-4 bg-cyan-400 rounded-full"
+                            />
+                        </motion.div>
                         <h1 className="text-2xl font-bold text-cyan-400 text-glow-cyan tracking-widest mb-4">
                             IDENTITY REGISTERED
                         </h1>
@@ -84,26 +97,108 @@ export function WaitingView() {
                         <h1 className="text-2xl font-bold text-green-400 tracking-widest mb-4">
                             TARGET LOCKED
                         </h1>
-                        <p className="text-slate-400 mb-2">
-                            Connection established
-                        </p>
-                        <p className="text-slate-500 text-sm mb-6">
-                            Waiting for squad synchronization...
-                        </p>
 
-                        {/* Squad sync button - advances ALL players */}
+                        {/* Show the target that was just scanned */}
+                        {target && (
+                            <motion.div
+                                initial={{ scale: 0.9, opacity: 0 }}
+                                animate={{ scale: 1, opacity: 1 }}
+                                className="cyber-card p-4 mb-6 relative overflow-hidden"
+                            >
+                                <div className="scanlines absolute inset-0 pointer-events-none" />
+                                
+                                <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-green-400" />
+                                <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-green-400" />
+                                <div className="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-green-400" />
+                                <div className="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-green-400" />
+
+                                <div className="text-center mb-3">
+                                    <span className="px-3 py-1 bg-green-500/20 border border-green-500 text-green-400 text-xs tracking-widest">
+                                        CONFIRMED
+                                    </span>
+                                </div>
+
+                                <div className="relative mx-auto mb-3" style={{ width: '150px', height: '150px' }}>
+                                    <img
+                                        src={target.drawing}
+                                        alt="Target"
+                                        className="w-full h-full object-cover border-2 border-green-400/50"
+                                    />
+                                    <div className="absolute inset-0 border-2 border-green-400 opacity-50" />
+                                </div>
+
+                                <div className="text-center">
+                                    <p className="text-pink-400 text-xs mb-1 uppercase tracking-wider">
+                                        {target.prompt}
+                                    </p>
+                                    <p className="text-white font-mono text-sm">
+                                        "{target.tell}"
+                                    </p>
+                                </div>
+                            </motion.div>
+                        )}
+
+                        {/* Squad sync status */}
+                        <div className="mb-6">
+                            <p className="text-slate-400 mb-2">
+                                Waiting for squad synchronization...
+                            </p>
+                            <div className="flex items-center justify-center gap-2 mb-2">
+                                <span className="text-cyan-400 font-mono text-lg">
+                                    {confirmedCount} / {totalCount}
+                                </span>
+                                <span className="text-slate-500 text-sm">teammates ready</span>
+                            </div>
+                            
+                            {/* Progress bar */}
+                            <div className="w-full bg-slate-800 rounded-full h-2 mb-4">
+                                <motion.div
+                                    className="bg-gradient-to-r from-cyan-400 to-green-400 h-2 rounded-full"
+                                    initial={{ width: 0 }}
+                                    animate={{ width: totalCount > 0 ? `${(confirmedCount / totalCount) * 100}%` : '0%' }}
+                                    transition={{ duration: 0.3 }}
+                                />
+                            </div>
+
+                            {!allConfirmed && (
+                                <p className="text-yellow-400 text-sm animate-pulse">
+                                    Waiting for {totalCount - confirmedCount} more teammate{totalCount - confirmedCount !== 1 ? 's' : ''} to confirm...
+                                </p>
+                            )}
+                        </div>
+
+                        {/* Squad sync button - only enabled when all confirmed */}
                         <Button
                             onClick={handleStartHeist}
-                            variant="secondary"
-                            className="mt-4"
+                            variant={allConfirmed ? "primary" : "secondary"}
+                            disabled={!allConfirmed}
+                            className={`w-full ${allConfirmed ? 'glow-cyan animate-pulse' : 'opacity-50'}`}
                         >
-                            ⚡ SQUAD READY - START HEIST
+                            {allConfirmed ? '⚡ SQUAD READY - START HEIST' : `⏳ WAITING FOR SQUAD (${confirmedCount}/${totalCount})`}
                         </Button>
                     </>
                 )}
 
                 {phase === 'heist' && (
                     <>
+                        {/* Status icon */}
+                        <motion.div
+                            animate={{
+                                rotate: [0, 360],
+                                borderColor: ['#22d3ee', '#f472b6', '#22d3ee'],
+                            }}
+                            transition={{
+                                rotate: { duration: 8, repeat: Infinity, ease: 'linear' },
+                                borderColor: { duration: 3, repeat: Infinity },
+                            }}
+                            className="w-24 h-24 border-4 border-cyan-400 rounded-full mx-auto mb-8 flex items-center justify-center"
+                        >
+                            <motion.div
+                                animate={{ scale: [1, 1.2, 1] }}
+                                transition={{ duration: 2, repeat: Infinity }}
+                                className="w-4 h-4 bg-cyan-400 rounded-full"
+                            />
+                        </motion.div>
                         <h1 className="text-2xl font-bold text-pink-400 text-glow-pink tracking-widest mb-4">
                             SQUAD SYNCHRONIZED
                         </h1>

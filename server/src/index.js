@@ -6,17 +6,45 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import GameManager from './GameManager.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Serve static files from client build in production
+const clientDistPath = join(__dirname, '../../client/dist');
+app.use(express.static(clientDistPath));
+
+// SPA fallback - serve index.html for all non-API routes (Express 5 compatible)
+app.use((req, res, next) => {
+    if (req.method === 'GET' && !req.path.startsWith('/socket.io') && !req.path.includes('.')) {
+        res.sendFile(join(clientDistPath, 'index.html'));
+    } else {
+        next();
+    }
+});
+
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
     cors: {
-        origin: ['http://localhost:5173', 'http://localhost:3000'],
+        origin: '*',
         methods: ['GET', 'POST'],
+    },
+    pingTimeout: 60000,
+    pingInterval: 25000,
+    maxHttpBufferSize: 1e6,
+    perMessageDeflate: {
+        threshold: 1024,
+    },
+    connectionStateRecovery: {
+        maxDisconnectionDuration: 2 * 60 * 1000,
+        skipMiddlewares: true,
     },
 });
 
@@ -58,15 +86,58 @@ io.on('connection', (socket) => {
         callback({ target });
     });
 
+    // Get squad status (for waiting view - how many confirmed)
+    socket.on('get_squad_status', (callback) => {
+        const player = gameManager.players.get(socket.id);
+        if (!player || !player.squad) {
+            console.log(`[GET_SQUAD_STATUS] No player or squad for ${socket.id}, player exists: ${!!player}, squad: ${player?.squad}`);
+            callback({ confirmedCount: 0, totalCount: 0, allConfirmed: false });
+            return;
+        }
+
+        const squad = gameManager.squads.get(player.squad);
+        if (!squad) {
+            console.log(`[GET_SQUAD_STATUS] Squad ${player.squad} not found in squads map`);
+            callback({ confirmedCount: 0, totalCount: 0, allConfirmed: false });
+            return;
+        }
+
+        const confirmedCount = squad.getCompletedScans();
+        const totalCount = squad.players.length;
+        const allConfirmed = confirmedCount === totalCount;
+        console.log(`[GET_SQUAD_STATUS] Squad ${player.squad}: ${confirmedCount}/${totalCount} confirmed`);
+
+        callback({ confirmedCount, totalCount, allConfirmed });
+    });
+
     // Scan target
     socket.on('scan', (data, callback) => {
         const result = gameManager.handleScan(socket.id, data.targetId);
 
         if (result.success) {
-            // Notify squad about scan progress
-            io.to(result.squadId).emit('scan_complete', {
-                scannerId: socket.id,
-            });
+            const squad = gameManager.squads.get(result.squadId);
+            
+            // Notify ALL squad members about scan progress (emit to each player directly)
+            if (squad) {
+                const confirmedCount = squad.getCompletedScans();
+                const totalCount = squad.players.length;
+                const allConfirmed = confirmedCount === totalCount;
+                
+                squad.players.forEach(p => {
+                    io.to(p.id).emit('scan_complete', {
+                        scannerId: socket.id,
+                        confirmedCount,
+                        totalCount,
+                        allConfirmed
+                    });
+                });
+
+                if (result.loopComplete) {
+                    squad.players.forEach(p => {
+                        io.to(p.id).emit('squad_activated');
+                    });
+                }
+            }
 
             // Broadcast to GM for network visualization
             io.to('gm').emit('scan_recorded', {
@@ -75,7 +146,6 @@ io.on('connection', (socket) => {
             });
 
             if (result.loopComplete) {
-                io.to(result.squadId).emit('squad_activated');
                 io.to('gm').emit('squad_loop_complete', { squadId: result.squadId });
             }
         }
@@ -135,124 +205,258 @@ io.on('connection', (socket) => {
             return;
         }
 
+        const squad = gameManager.squads.get(player.squad);
+        if (!squad) {
+            callback({ success: false });
+            return;
+        }
+
+        // Already completed - don't process again
+        if (squad.finishPosition !== null) {
+            callback({ success: true, position: squad.finishPosition, isWinner: squad.finishPosition === 1 });
+            return;
+        }
+
         const success = gameManager.verifyCode(player.squad, data.code);
 
         if (success) {
-            io.to(player.squad).emit('heist_complete');
-            io.to('gm').emit('squad_completed', { squadId: player.squad });
-        }
+            // Track finish position - increment global counter
+            if (!global.finishCounter) {
+                global.finishCounter = 0;
+            }
+            global.finishCounter++;
+            const position = global.finishCounter;
+            const totalSquads = gameManager.squads.size;
+            const isWinner = position === 1;
 
-        callback({ success });
+            // Mark squad as complete with position
+            squad.markComplete(position);
+
+            // Emit to each squad player directly with their result
+            squad.players.forEach(p => {
+                io.to(p.id).emit('heist_complete', { 
+                    position, 
+                    totalSquads, 
+                    isWinner,
+                    tasksCompleted: squad.tasksCompleted
+                });
+            });
+            
+            io.to('gm').emit('squad_completed', { 
+                squadId: player.squad, 
+                position, 
+                totalSquads 
+            });
+            
+            // Broadcast updated leaderboard
+            io.to('gm').emit('leaderboard_update', gameManager.getLeaderboard());
+
+            callback({ success: true, position, isWinner });
+        } else {
+            callback({ success: false });
+        }
     });
 
-    // DEV: Squad-wide advance to next view
-    // When one player triggers this, ALL players advance
+    // Squad-wide advance to next view - ONLY affects the player's squad
     socket.on('squad_advance', (data) => {
-        console.log(`[SQUAD_ADVANCE] Broadcasting view change to: ${data.view}`);
-        // Broadcast to ALL connected players
-        io.emit('view_change', { view: data.view });
+        const player = gameManager.players.get(socket.id);
+        if (!player || !player.squad) {
+            console.log(`[SQUAD_ADVANCE] Player ${socket.id} not in a squad`);
+            return;
+        }
+
+        const squad = gameManager.squads.get(player.squad);
+        if (!squad) {
+            console.log(`[SQUAD_ADVANCE] Squad ${player.squad} not found`);
+            return;
+        }
+
+        // Check if ALL squad members have confirmed their scans
+        const allConfirmed = squad.players.every(p => p.scanComplete);
+        if (!allConfirmed) {
+            console.log(`[SQUAD_ADVANCE] Squad ${player.squad} not all confirmed yet`);
+            socket.emit('squad_advance_denied', { 
+                message: 'Waiting for all squad members to confirm their targets',
+                confirmedCount: squad.getCompletedScans(),
+                totalCount: squad.players.length
+            });
+            return;
+        }
+
+        console.log(`[SQUAD_ADVANCE] Squad ${player.squad} advancing to: ${data.view}`);
+        
+        // Track the view change
+        squad.setView(data.view);
+        
+        // Only broadcast to THIS squad's players
+        squad.players.forEach(p => {
+            io.to(p.id).emit('view_change', { view: data.view });
+        });
+        
+        // Broadcast updated leaderboard to GM
+        io.to('gm').emit('leaderboard_update', gameManager.getLeaderboard());
     });
 
-    // Get code fragment - assigns unique positions to each player
+    // Get code fragment - assigns unique positions to each player PER SQUAD
+    // Uses the code generated by GameManager which scales with team size
     socket.on('get_fragment', (callback) => {
-        const CODE = 'A3F7';
-
-        // Initialize fragment tracking
-        if (!global.fragmentAssignments) {
-            global.fragmentAssignments = new Map();
-            global.fragmentCounter = 0;
+        const player = gameManager.players.get(socket.id);
+        if (!player || !player.squad) {
+            callback({ char: '?', position: 1, codeLength: 4 });
+            return;
         }
+
+        const squad = gameManager.squads.get(player.squad);
+        if (!squad) {
+            callback({ char: '?', position: 1, codeLength: 4 });
+            return;
+        }
+
+        const squadId = player.squad;
+        
+        // Get code from GameManager (generated during heist phase with team-size scaling)
+        let codeFragments = gameManager.codeFragments.get(squadId);
+        
+        // If code doesn't exist yet, generate it now (handles squad_advance skipping global phase)
+        if (!codeFragments || codeFragments.length === 0) {
+            const teamSize = squad.players.length;
+            codeFragments = gameManager.generateCodeFragments(teamSize);
+            gameManager.codeFragments.set(squadId, codeFragments);
+            console.log(`[FRAGMENT] Generated on-demand code for ${squadId}: ${codeFragments.join('')} (${teamSize} players)`);
+        }
+
+        const codeLength = codeFragments.length;
+
+        // Initialize per-squad fragment tracking for player assignments
+        if (!global.squadFragments) {
+            global.squadFragments = new Map(); // squadId -> { assignments Map, counter }
+        }
+
+        // Initialize tracking for this squad if not exists
+        if (!global.squadFragments.has(squadId)) {
+            global.squadFragments.set(squadId, {
+                assignments: new Map(),
+                counter: 0
+            });
+            console.log(`[FRAGMENT] Squad ${squadId}: Code is ${codeFragments.join('')} (length ${codeLength})`);
+        }
+
+        const squadData = global.squadFragments.get(squadId);
 
         // Check if this socket already has an assignment
-        if (global.fragmentAssignments.has(socket.id)) {
-            const assignment = global.fragmentAssignments.get(socket.id);
+        if (squadData.assignments.has(socket.id)) {
+            const assignment = squadData.assignments.get(socket.id);
+            // Always include codeLength in case it was missing from earlier assignment
+            assignment.codeLength = codeLength;
             callback(assignment);
             return;
         }
 
-        // Assign next position (cycles 0-3)
-        const position = global.fragmentCounter % 4;
-        global.fragmentCounter++;
+        // Assign next position (cycles through code length)
+        const position = squadData.counter % codeLength;
+        squadData.counter++;
 
         const assignment = {
-            char: CODE[position],
-            position: position + 1 // 1-indexed for display
+            char: codeFragments[position],
+            position: position + 1, // 1-indexed for display
+            codeLength: codeLength
         };
 
-        global.fragmentAssignments.set(socket.id, assignment);
-        console.log(`[FRAGMENT] Assigned position ${assignment.position} (${assignment.char}) to ${socket.id}`);
+        squadData.assignments.set(socket.id, assignment);
+        console.log(`[FRAGMENT] Squad ${squadId}: Assigned position ${assignment.position}/${codeLength} (${assignment.char}) to ${socket.id}`);
 
         callback(assignment);
     });
 
-    // Tumbler state tracking for sync
+    // Tumbler state tracking for sync - PER SQUAD
     socket.on('tumbler_state', (data) => {
-        // Track this player's sweet spot state
-        if (!global.tumblerStates) {
-            global.tumblerStates = new Map();
-            global.tumblerSyncStart = null;
+        const player = gameManager.players.get(socket.id);
+        if (!player || !player.squad) return;
+
+        const squad = gameManager.squads.get(player.squad);
+        if (!squad) return;
+
+        const squadId = player.squad;
+
+        // Initialize per-squad tumbler tracking
+        if (!global.squadTumblerStates) {
+            global.squadTumblerStates = new Map(); // squadId -> Map of player states
+            global.squadTumblerSyncStart = new Map(); // squadId -> timestamp
         }
 
-        global.tumblerStates.set(socket.id, {
+        if (!global.squadTumblerStates.has(squadId)) {
+            global.squadTumblerStates.set(squadId, new Map());
+        }
+
+        const squadStates = global.squadTumblerStates.get(squadId);
+        squadStates.set(socket.id, {
             atSweetSpot: data.atSweetSpot,
             timestamp: Date.now()
         });
 
-        // Clean up stale entries (players who haven't sent update in 2s)
+        // Clean up stale entries for this squad (players who haven't sent update in 2s)
         const now = Date.now();
-        for (const [id, state] of global.tumblerStates.entries()) {
+        for (const [id, state] of squadStates.entries()) {
             if (now - state.timestamp > 2000) {
-                global.tumblerStates.delete(id);
+                squadStates.delete(id);
             }
         }
 
-        // Count how many players are connected and at sweet spot
-        const totalPlayers = global.tumblerStates.size;
+        // Count how many squad members are at sweet spot
+        const squadSize = squad.players.length;
         let playersAtSweetSpot = 0;
 
-        for (const [, state] of global.tumblerStates.entries()) {
+        for (const [, state] of squadStates.entries()) {
             if (state.atSweetSpot) playersAtSweetSpot++;
         }
 
-        // Check if ALL players are at sweet spot
-        const allSynced = totalPlayers > 0 && playersAtSweetSpot === totalPlayers;
+        // Check if ALL squad members are at sweet spot
+        const allSynced = squadStates.size === squadSize && playersAtSweetSpot === squadSize;
 
         if (allSynced) {
-            if (!global.tumblerSyncStart) {
-                global.tumblerSyncStart = Date.now();
-                console.log('[TUMBLER] All players synced! Starting 3s timer...');
+            if (!global.squadTumblerSyncStart.has(squadId)) {
+                global.squadTumblerSyncStart.set(squadId, Date.now());
+                console.log(`[TUMBLER] Squad ${squadId} all synced! Starting 3s timer...`);
             }
 
-            const syncTime = (Date.now() - global.tumblerSyncStart) / 1000;
+            const syncTime = (Date.now() - global.squadTumblerSyncStart.get(squadId)) / 1000;
 
-            // Broadcast sync progress to all players
-            io.emit('tumbler_sync', {
-                synced: true,
-                syncTime: syncTime,
-                playersReady: playersAtSweetSpot,
-                totalPlayers: totalPlayers
+            // Broadcast sync progress to THIS SQUAD ONLY
+            squad.players.forEach(p => {
+                io.to(p.id).emit('tumbler_sync', {
+                    synced: true,
+                    syncTime: syncTime,
+                    playersReady: playersAtSweetSpot,
+                    totalPlayers: squadSize
+                });
             });
 
-            // If synced for 3 seconds, advance!
+            // If synced for 3 seconds, advance THIS SQUAD ONLY!
             if (syncTime >= 3) {
-                console.log('[TUMBLER] VAULT CRACKED! All players held for 3s!');
-                global.tumblerSyncStart = null;
-                global.tumblerStates.clear();
-                io.emit('view_change', { view: 'getaway' });
+                console.log(`[TUMBLER] Squad ${squadId} VAULT CRACKED! All players held for 3s!`);
+                global.squadTumblerSyncStart.delete(squadId);
+                global.squadTumblerStates.delete(squadId);
+                
+                // Advance only this squad
+                squad.players.forEach(p => {
+                    io.to(p.id).emit('view_change', { view: 'getaway' });
+                });
             }
         } else {
-            // Not all synced - reset timer
-            if (global.tumblerSyncStart) {
-                console.log('[TUMBLER] Sync broken - timer reset');
-                global.tumblerSyncStart = null;
+            // Not all synced - reset timer for this squad
+            if (global.squadTumblerSyncStart.has(squadId)) {
+                console.log(`[TUMBLER] Squad ${squadId} sync broken - timer reset`);
+                global.squadTumblerSyncStart.delete(squadId);
             }
 
-            // Broadcast current status
-            io.emit('tumbler_sync', {
-                synced: false,
-                syncTime: 0,
-                playersReady: playersAtSweetSpot,
-                totalPlayers: totalPlayers
+            // Broadcast current status to THIS SQUAD ONLY
+            squad.players.forEach(p => {
+                io.to(p.id).emit('tumbler_sync', {
+                    synced: false,
+                    syncTime: 0,
+                    playersReady: playersAtSweetSpot,
+                    totalPlayers: squadSize
+                });
             });
         }
     });
@@ -285,34 +489,56 @@ gmNamespace.on('connection', (socket) => {
     socket.emit('game_state', gameManager.getGameState());
 
     // Admin controls
+    socket.on('set_phase', (data) => {
+        console.log(`[GM] Setting phase to: ${data.phase}`);
+        const result = gameManager.setPhase(data.phase);
+        if (!result.success) {
+            socket.emit('phase_error', { message: result.message });
+        }
+        gmNamespace.emit('game_state', gameManager.getGameState());
+    });
+
+    socket.on('set_team_size', (data) => {
+        console.log(`[GM] Setting team size to: ${data.size}`);
+        gameManager.setTeamSize(data.size);
+        gmNamespace.emit('game_state', gameManager.getGameState());
+    });
+
     socket.on('start_game', () => {
-        gameManager.setPhase('chain');
+        const result = gameManager.setPhase('chain');
+        if (!result.success) {
+            socket.emit('phase_error', { message: result.message });
+        }
+        gmNamespace.emit('game_state', gameManager.getGameState());
     });
 
     socket.on('start_heist', () => {
         gameManager.setPhase('heist');
+        gmNamespace.emit('game_state', gameManager.getGameState());
     });
 
     socket.on('reset_game', () => {
-        // Reset all state
-        gameManager.phase = 'lobby';
-        gameManager.players.clear();
-        gameManager.squads.clear();
-        gameManager.drawings = [];
-        gameManager.codeFragments.clear();
-
+        gameManager.resetGame();
+        
+        // Clear all per-squad global state
+        if (global.squadTumblerStates) global.squadTumblerStates.clear();
+        if (global.squadTumblerSyncStart) global.squadTumblerSyncStart.clear();
+        if (global.squadFragments) global.squadFragments.clear();
+        
         io.emit('game_reset');
-        socket.emit('game_state', gameManager.getGameState());
+        gmNamespace.emit('game_state', gameManager.getGameState());
     });
 });
 
-// Periodic state broadcast to GM
+// Periodic state broadcast to GM (every 2 seconds for auto-refresh)
 setInterval(() => {
-    io.to('gm').emit('game_state', gameManager.getGameState());
+    gmNamespace.emit('game_state', gameManager.getGameState());
 }, 1000);
 
 const PORT = process.env.PORT || 3001;
+const HOST = process.env.NODE_ENV === 'production' ? '0.0.0.0' : 'localhost';
 
-httpServer.listen(PORT, () => {
-    console.log(`🎮 Protocol: UNMASK server running on port ${PORT}`);
+httpServer.listen(PORT, HOST, () => {
+    console.log(`🎮 Protocol: UNMASK server running on ${HOST}:${PORT}`);
+    console.log(`📊 Configured for up to 100+ concurrent players`);
 });

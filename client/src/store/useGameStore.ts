@@ -14,6 +14,7 @@ export interface PlayerData {
 }
 
 export interface TargetData {
+    id: string;
     drawing: string;
     tell: string;
     prompt: string;
@@ -31,6 +32,19 @@ export interface ClueData {
     clue: string;
 }
 
+export interface SquadStatus {
+    confirmedCount: number;
+    totalCount: number;
+    allConfirmed: boolean;
+}
+
+export interface HeistResult {
+    position: number;
+    totalSquads: number;
+    isWinner: boolean;
+    tasksCompleted: number;
+}
+
 export interface GameState {
     // Connection
     socket: Socket | null;
@@ -46,10 +60,14 @@ export interface GameState {
 
     // Squad Data
     squad: SquadData | null;
+    squadStatus: SquadStatus | null;
 
     // Minigame Data
     clue: string | null;
     codeFragments: string[];
+
+    // Result Data
+    heistResult: HeistResult | null;
 
     // UI State
     isScanning: boolean;
@@ -80,6 +98,7 @@ export interface GameState {
 
     // Squad
     squadAdvance: (view: GameView) => void;
+    getSquadStatus: () => Promise<SquadStatus>;
 
     // UI
     triggerSuccess: () => void;
@@ -106,8 +125,10 @@ export const useGameStore = create<GameState>((set, get) => ({
     player: null,
     target: null,
     squad: null,
+    squadStatus: null,
     clue: null,
     codeFragments: [],
+    heistResult: null,
     isScanning: false,
     scanComplete: false,
     showSuccess: false,
@@ -158,9 +179,18 @@ export const useGameStore = create<GameState>((set, get) => ({
             get().triggerSuccess();
         });
 
-        // Scan complete notification
-        socket.on('scan_complete', () => {
-            // Squad member completed a scan
+        // Scan complete notification - update squad status directly from server
+        socket.on('scan_complete', (data: { scannerId: string; confirmedCount: number; totalCount: number; allConfirmed: boolean }) => {
+            console.log('[SOCKET] scan_complete received:', data);
+            // Update squad status directly from the authoritative server broadcast
+            set({ squadStatus: { confirmedCount: data.confirmedCount, totalCount: data.totalCount, allConfirmed: data.allConfirmed } });
+        });
+        
+        // Squad advance denied - not all confirmed yet
+        socket.on('squad_advance_denied', (data: { message: string; confirmedCount: number; totalCount: number }) => {
+            console.log('[SOCKET] Squad advance denied:', data.message);
+            set({ squadStatus: { confirmedCount: data.confirmedCount, totalCount: data.totalCount, allConfirmed: false } });
+            get().triggerError();
         });
 
         // Minigame events
@@ -171,9 +201,12 @@ export const useGameStore = create<GameState>((set, get) => ({
             }
         });
 
-        // Heist complete
-        socket.on('heist_complete', () => {
-            set({ currentView: 'complete' });
+        // Heist complete with result data
+        socket.on('heist_complete', (data: { position: number; totalSquads: number; isWinner: boolean; tasksCompleted: number }) => {
+            set({ 
+                currentView: 'complete',
+                heistResult: data
+            });
             get().triggerSuccess();
         });
 
@@ -185,7 +218,10 @@ export const useGameStore = create<GameState>((set, get) => ({
                 player: null,
                 target: null,
                 squad: null,
+                squadStatus: null,
                 clue: null,
+                codeFragments: [],
+                heistResult: null,
                 scanComplete: false,
             });
         });
@@ -331,13 +367,27 @@ export const useGameStore = create<GameState>((set, get) => ({
         });
     },
 
-    // Squad - broadcast view change to all players
+    // Squad - broadcast view change to squad players only
     squadAdvance: (view) => {
         const { socket } = get();
         if (!socket) return;
 
-        console.log('[SQUAD] Broadcasting advance to:', view);
+        console.log('[SQUAD] Requesting advance to:', view);
         socket.emit('squad_advance', { view });
+    },
+
+    // Get squad status (how many have confirmed scans)
+    getSquadStatus: async () => {
+        const { socket } = get();
+        if (!socket) return { confirmedCount: 0, totalCount: 0, allConfirmed: false };
+
+        return new Promise((resolve) => {
+            socket.emit('get_squad_status', (response: { confirmedCount: number; totalCount: number; allConfirmed: boolean }) => {
+                console.log('[SOCKET] get_squad_status response:', response);
+                set({ squadStatus: response });
+                resolve(response);
+            });
+        });
     },
 
     // UI Effects
