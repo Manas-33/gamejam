@@ -157,7 +157,7 @@ export function GetawayView() {
                 className="cyber-card p-4 mb-4"
             >
                 <p className="text-pink-400 text-xs uppercase tracking-wider mb-2 text-center">
-                    YOUR FRAGMENT {myFragment ? `(POSITION ${myFragment.position})` : ''}:
+                    YOUR FRAGMENT {myFragment ? `(POSITION ${myFragment.position} OF ${codeLength})` : ''}:
                 </p>
                 <div className="flex justify-center">
                     {myFragment ? (

@@ -273,10 +273,14 @@ io.on('connection', (socket) => {
         const squadId = player.squad;
         
         // Get code from GameManager (generated during heist phase with team-size scaling)
-        const codeFragments = gameManager.codeFragments.get(squadId);
+        let codeFragments = gameManager.codeFragments.get(squadId);
+        
+        // If code doesn't exist yet, generate it now (handles squad_advance skipping global phase)
         if (!codeFragments || codeFragments.length === 0) {
-            callback({ char: '?', position: 1, codeLength: 4 });
-            return;
+            const teamSize = squad.players.length;
+            codeFragments = gameManager.generateCodeFragments(teamSize);
+            gameManager.codeFragments.set(squadId, codeFragments);
+            console.log(`[FRAGMENT] Generated on-demand code for ${squadId}: ${codeFragments.join('')} (${teamSize} players)`);
         }
 
         const codeLength = codeFragments.length;
@@ -300,6 +304,8 @@ io.on('connection', (socket) => {
         // Check if this socket already has an assignment
         if (squadData.assignments.has(socket.id)) {
             const assignment = squadData.assignments.get(socket.id);
+            // Always include codeLength in case it was missing from earlier assignment
+            assignment.codeLength = codeLength;
             callback(assignment);
             return;
         }

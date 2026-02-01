@@ -227,11 +227,23 @@ class GameManager {
 
         if (newPhase === 'heist') {
             // Initialize code fragments for each squad
-            // Code length is based on squad size (2 chars per player)
+            // Code length is based on squad size (1 char per player)
             this.squads.forEach((squad, squadId) => {
                 const teamSize = squad.players.length;
                 this.codeFragments.set(squadId, this.generateCodeFragments(teamSize));
                 squad.setMinigame('signal_jammer');
+            });
+        }
+
+        if (newPhase === 'getaway') {
+            // Generate codes if they weren't already generated during heist
+            // This handles edge cases like skipping directly to getaway
+            this.squads.forEach((squad, squadId) => {
+                if (!this.codeFragments.has(squadId)) {
+                    const teamSize = squad.players.length;
+                    this.codeFragments.set(squadId, this.generateCodeFragments(teamSize));
+                    console.log(`[GETAWAY] Generated fallback code for ${squadId}: ${this.codeFragments.get(squadId).join('')}`);
+                }
             });
         }
 
