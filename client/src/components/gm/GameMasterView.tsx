@@ -277,7 +277,7 @@ export function GameMasterView() {
                                 <div className="aspect-video bg-black border-2 border-cyan-400/30 relative overflow-hidden mb-8">
                                     <iframe
                                         className="absolute inset-0 w-full h-full"
-                                        src="https://www.youtube.com/embed/djV11Xbc914?autoplay=1&mute=0&controls=1"
+                                        src="https://www.youtube.com/embed/AhfEiKfFNhQ?autoplay=1&mute=0&controls=1"
                                         title="Mission Briefing"
                                         frameBorder="0"
                                         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
