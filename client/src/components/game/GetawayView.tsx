@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore } from '../../store/useGameStore';
+import { sfx } from '../../hooks/useSFX';
 
 interface Fragment {
     char: string;
@@ -65,6 +66,7 @@ export function GetawayView() {
         socket?.emit('verify_code', { code: code.toUpperCase() }, (result: { success: boolean }) => {
             if (result.success) {
                 triggerSuccess();
+                sfx.success();
                 setCompleted(true);
 
                 if (navigator.vibrate) {
@@ -78,6 +80,7 @@ export function GetawayView() {
             } else {
                 setWrongAttempts((prev) => prev + 1);
                 triggerError();
+                sfx.error();
 
                 if (navigator.vibrate) {
                     navigator.vibrate([100, 50, 100, 50, 100]);
@@ -90,6 +93,7 @@ export function GetawayView() {
     const handleKeyInput = (char: string) => {
         if (code.length < codeLength && !completed) {
             setCode((prev) => prev + char);
+            sfx.keypress();
             if (navigator.vibrate) {
                 navigator.vibrate(20);
             }
@@ -98,6 +102,7 @@ export function GetawayView() {
 
     const handleBackspace = () => {
         setCode((prev) => prev.slice(0, -1));
+        sfx.delete();
     };
 
     const keypad = [

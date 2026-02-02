@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore } from '../../store/useGameStore';
+import { sfx } from '../../hooks/useSFX';
 
 export function SignalJammer() {
     const socket = useGameStore((s) => s.socket);
@@ -88,6 +89,7 @@ export function SignalJammer() {
 
         if (result.success) {
             triggerSuccess();
+            sfx.success();
             setSolved(true);
 
                 // Advance the entire squad to next minigame
@@ -98,6 +100,7 @@ export function SignalJammer() {
                 // Wrong guess
                 setWrongGuesses((prev) => new Set([...prev, index]));
                 triggerError();
+                sfx.error();
 
                 // Haptic feedback for error
                 if (navigator.vibrate) {

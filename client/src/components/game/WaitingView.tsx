@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore } from '../../store/useGameStore';
 import { Button } from '../ui/Button';
+import { sfx } from '../../hooks/useSFX';
 import QRCode from 'react-qr-code';
 
 export function WaitingView() {
@@ -45,6 +46,7 @@ export function WaitingView() {
     }, [showMyQR]);
 
     const handleStartHeist = () => {
+        sfx.transition();
         squadAdvance('signal_jammer');
     };
 
@@ -206,7 +208,10 @@ export function WaitingView() {
                         {/* Show My Code button - for hunters looking for YOU */}
                         <motion.button
                             whileTap={{ scale: 0.95 }}
-                            onClick={() => setShowMyQR(true)}
+                            onClick={() => {
+                                setShowMyQR(true);
+                                sfx.click();
+                            }}
                             className="w-full mt-4 py-3 bg-pink-500/20 border border-pink-400 text-pink-400 
                                      font-bold tracking-wider"
                         >

@@ -2,6 +2,7 @@ import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '../ui/Button';
 import { useGameStore } from '../../store/useGameStore';
+import { sfx } from '../../hooks/useSFX';
 
 // Random prompts - visual/descriptive for identifying players
 const PROMPTS = [
@@ -127,6 +128,11 @@ export function LobbyView() {
                 tell: tell.trim(),
                 prompt,
             });
+            sfx.success();
+            // Haptic feedback
+            if (navigator.vibrate) {
+                navigator.vibrate([50, 50, 100]);
+            }
         } catch (error) {
             console.error('Registration failed:', error);
         } finally {
@@ -215,7 +221,10 @@ export function LobbyView() {
                     {colors.map((color) => (
                         <button
                             key={color}
-                            onClick={() => setBrushColor(color)}
+                            onClick={() => {
+                                setBrushColor(color);
+                                sfx.click();
+                            }}
                             className={`w-8 h-8 rounded-full border-2 transition-transform ${brushColor === color ? 'border-white scale-110' : 'border-transparent'
                                 }`}
                             style={{ backgroundColor: color }}

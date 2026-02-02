@@ -1,8 +1,21 @@
+import { useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useGameStore } from '../../store/useGameStore';
+import { sfx } from '../../hooks/useSFX';
 
 export function CompleteView() {
     const heistResult = useGameStore((state) => state.heistResult);
+
+    // Play victory or defeat sound on mount
+    useEffect(() => {
+        if (heistResult) {
+            if (heistResult.isWinner) {
+                sfx.victory();
+            } else {
+                sfx.defeat();
+            }
+        }
+    }, [heistResult]);
     
     // If no result yet, show loading state
     if (!heistResult) {

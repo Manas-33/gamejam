@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore } from '../../store/useGameStore';
+import { sfx } from '../../hooks/useSFX';
 
 interface TumblerProps {
     sweetSpotRange?: number;
@@ -140,8 +141,9 @@ export function Tumbler({
 
         const atSweetSpot = checkSweetSpot(angle);
 
-        // Haptic on entering/leaving sweet spot
+        // Haptic and SFX on entering sweet spot
         if (atSweetSpot && !isAtSweetSpotRef.current) {
+            sfx.lockIn();
             if (navigator.vibrate) navigator.vibrate(20);
         }
 
@@ -245,6 +247,7 @@ export function Tumbler({
                 setCompleted(true);
                 completedRef.current = true; // Update ref for interval
                 triggerSuccess();
+                sfx.success();
                 if (navigator.vibrate) {
                     navigator.vibrate([50, 50, 100, 50, 150]);
                 }

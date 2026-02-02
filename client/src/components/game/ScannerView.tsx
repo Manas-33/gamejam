@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Scanner } from '@yudiel/react-qr-scanner';
 import QRCode from 'react-qr-code';
 import { useGameStore } from '../../store/useGameStore';
+import { sfx } from '../../hooks/useSFX';
 
 export function ScannerView() {
     const target = useGameStore((s) => s.target);
@@ -10,6 +11,8 @@ export function ScannerView() {
     const getMyScanCode = useGameStore((s) => s.getMyScanCode);
     const verifyScan = useGameStore((s) => s.verifyScan);
     const setView = useGameStore((s) => s.setView);
+    const triggerSuccess = useGameStore((s) => s.triggerSuccess);
+    const triggerError = useGameStore((s) => s.triggerError);
     const showSuccess = useGameStore((s) => s.showSuccess);
     const showError = useGameStore((s) => s.showError);
 
@@ -62,23 +65,36 @@ export function ScannerView() {
 
         if (response.success) {
             setScanSuccess(true);
+            triggerSuccess();
+            sfx.scan();
+            sfx.success();
+            
             // Haptic feedback
             if (navigator.vibrate) {
-                navigator.vibrate([50, 50, 100, 50, 150]);
+                navigator.vibrate([100, 50, 100]);
             }
-            // Move to waiting view after brief delay
+
+            // Move to waiting view after delay
             setTimeout(() => {
                 setView('waiting');
             }, 1500);
         } else {
-            setScanError(response.message);
+            setScanError('Incorrect target! Try again.');
+            triggerError();
+            sfx.error();
+            
             if (navigator.vibrate) {
-                navigator.vibrate([100, 50, 100]);
+                navigator.vibrate([200]);
             }
         }
 
         setIsProcessing(false);
-    }, [isProcessing, scanSuccess, verifyScan, setView]);
+    }, [isProcessing, scanSuccess, verifyScan, setView, triggerSuccess, triggerError]);
+
+    const handleSetMode = useCallback((newMode: 'info' | 'scan' | 'show_code') => {
+        sfx.click();
+        setMode(newMode);
+    }, []);
 
     if (!target) {
         return (
@@ -185,23 +201,22 @@ export function ScannerView() {
 
                     {/* Action Buttons */}
                     <div className="mt-auto space-y-3">
-                        <motion.button
-                            whileTap={{ scale: 0.95 }}
-                            onClick={() => setMode('scan')}
-                            className="w-full py-4 bg-cyan-500/20 border-2 border-cyan-400 text-cyan-400 
-                                     font-bold text-lg tracking-widest hover:bg-cyan-400/30"
+                        <div className="flex justify-center gap-4 mb-6">
+                        <button
+                            onClick={() => handleSetMode('scan')}
+                            className="bg-cyan-500/20 border border-cyan-400 text-cyan-400 px-6 py-3 rounded-lg font-bold flex items-center gap-2 hover:bg-cyan-500/30 transition-all"
                         >
-                            📷 SCAN TARGET'S CODE
-                        </motion.button>
-
-                        <motion.button
-                            whileTap={{ scale: 0.95 }}
-                            onClick={() => setMode('show_code')}
-                            className="w-full py-3 bg-pink-500/20 border border-pink-400 text-pink-400 
-                                     font-bold tracking-wider"
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><rect x="7" y="7" width="10" height="10" rx="1"/></svg>
+                            SCAN TARGET
+                        </button>
+                        <button
+                            onClick={() => handleSetMode('show_code')}
+                            className="bg-pink-500/20 border border-pink-400 text-pink-400 px-6 py-3 rounded-lg font-bold flex items-center gap-2 hover:bg-pink-500/30 transition-all"
                         >
-                            Show My Code (For My Hunter)
-                        </motion.button>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><rect x="7" y="7" width="3" height="3"/><rect x="14" y="7" width="3" height="3"/><rect x="7" y="14" width="3" height="3"/><rect x="14" y="14" width="3" height="3"/></svg>
+                            SHOW MY CODE
+                        </button>
+                    </div>
                     </div>
                 </motion.div>
             )}
